@@ -34,7 +34,7 @@ codesigns it, and launches it.
 - Not notarized, not Developer ID signed — ad-hoc codesign only. Gatekeeper
   will warn or block on any machine but the one that built it; right-click →
   Open to bypass, or build it yourself.
-- Compiles clean and launches; not yet tested against a real lecture — treat transcription quality and the auto-restart path as unverified.
+- Compiles clean and launches; not yet tested against a real lecture — treat transcription quality as unverified. The auto-restart path's bookkeeping is covered by `node test.js` (web) and was fixed on both platforms, but no test drives real audio through it.
 - macOS 14+ only; no Windows/Linux/iOS build.
 
 ## Web app (fallback — shipped)
@@ -69,7 +69,7 @@ can't call a local HTTP server).
 
 ```sh
 python3 -m http.server 8000   # then open http://localhost:8000
-node test.js                  # self-check for the markdown renderer
+node test.js                  # self-check: markdown renderer + the ~60s restart path
 ```
 
 Use `localhost`, not `file://` — the microphone needs a secure context.
