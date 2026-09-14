@@ -45,6 +45,6 @@ Deployed: https://helenc3.github.io/ainotetake/
 |---|---|
 | Backend / key proxy | The app leaves your machine and has real users |
 | Whisper (transformers.js) transcription | Chrome's recognizer mangles your lecturer, or you need Firefox |
-| Saving notes / sessions | You want more than one lecture at a time — localStorage first, DB only if that breaks |
+| Multiple saved lectures | Current build keeps one transcript + notes in localStorage across reloads; add a session list when one isn't enough |
 | Markdown library | The 8-line renderer in `md()` stops being enough |
 | Streaming notes as they generate | A lecture's worth of notes takes long enough to feel slow |

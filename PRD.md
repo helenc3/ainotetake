@@ -36,6 +36,7 @@ Secondary: anyone in a long meeting who wants structured notes, not a transcript
 | R4 | Work with a free API key; user picks the provider | ✅ 4 providers |
 | R5 | Option to run with no key and no data leaving the machine | ✅ Ollama |
 | R6 | Copy notes out to any other app | ✅ |
+| R9 | Transcript and notes survive an accidental reload | ✅ localStorage |
 | R7 | Never transmit or persist the API key beyond the user's own browser | ✅ localStorage |
 | R8 | Show a clear error when the mic is denied or the API rejects the call | ✅ |
 
