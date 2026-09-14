@@ -50,6 +50,9 @@ One static file. No build, no backend, no dependencies.
    `## Terms & definitions`, `## Action items` — and explicitly forbids inventing
    facts not in the transcript.
 3. **Copy** — markdown to clipboard.
+4. **Lectures** — each recording is saved separately and picked from a dropdown;
+   **New lecture** starts a fresh one, **Delete** removes the open one. Transcripts
+   from the older single-lecture build are migrated on first load.
 
 ### Providers
 
@@ -94,7 +97,7 @@ Deployed: https://helenc3.github.io/ainotetake/
 | Notarized / Developer ID signed Mac build | Distributing to anyone besides the developer |
 | Mac App Store distribution | Never planned for v1; would need sandboxing review |
 | Whisper (transformers.js or native) transcription | The platform recognizer mangles your lecturer, or you need cross-platform parity |
-| Multiple saved lectures | Current build keeps one transcript + notes persisted across reloads/relaunches; add a session list when one isn't enough |
 | Markdown library | The small hand-rolled renderer stops being enough |
 | Streaming notes as they generate | A lecture's worth of notes takes long enough to feel slow |
 | Windows/Linux native app | There's demand outside macOS |
+| Multiple lectures in the Mac app | Web has it; Mac still keeps a single transcript — port when the Mac app is the one you actually record with |

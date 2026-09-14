@@ -11,7 +11,7 @@ console.log('ok');
 
 // --- restart path: the ~60s cutoff is what makes a 90-min lecture work ---
 // Loads the page's real script against a stub DOM + fake SpeechRecognition.
-function loadApp() {
+function loadApp(seed = {}) {
   const el = () => ({ textContent: '', innerHTML: '', value: '', disabled: false,
     scrollTop: 0, focus() {}, classList: { toggle() {}, add() {}, remove() {} } });
   const nodes = {};
@@ -19,7 +19,7 @@ function loadApp() {
     getElementById: id => nodes[id] || (nodes[id] = el()),
     body: { classList: { toggle() {} } },
   };
-  const store = {};
+  const store = { ...seed };
   const localStorage = {
     getItem: k => (k in store ? store[k] : null),
     setItem: (k, v) => { store[k] = String(v); },
@@ -37,11 +37,12 @@ function loadApp() {
     cutoff() { this.onend(); }
   }
   const script = src.slice(src.indexOf('<script>') + 8, src.indexOf('</script>'));
-  const app = new Function('window', 'document', 'localStorage', 'navigator', 'Date',
-    script + '\nreturn { start, toggleUI, nodes: null, get final() { return final },' +
-             ' get want() { return want }, set want(v) { want = v } };'
-  )({ SpeechRecognition: FakeSR }, document, localStorage, { language: 'en-US' }, Date);
-  return { app, sessions, nodes };
+  const app = new Function('window', 'document', 'localStorage', 'navigator', 'Date', 'confirm',
+    script + '\nreturn { start, toggleUI, show, showNotes, get final() { return final },' +
+             ' set final(v) { final = v }, get lectures() { return lectures },' +
+             ' get cur() { return cur }, get want() { return want }, set want(v) { want = v } };'
+  )({ SpeechRecognition: FakeSR }, document, localStorage, { language: 'en-US' }, Date, () => true);
+  return { app, sessions, nodes, store };
 }
 
 // a cutoff mid-lecture must keep every word and duplicate none
@@ -88,3 +89,81 @@ function loadApp() {
   assert.ok(nodes.status.innerHTML.includes('err'), 'must tell the user it gave up');
 }
 console.log('ok — restart path');
+
+// --- multiple lectures ---
+// a transcript saved by the old single-lecture build must survive the upgrade
+{
+  const { app, store } = loadApp({ transcript: 'osmosis is passive', notes: '## Summary\nosmosis' });
+  assert.equal(app.lectures.length, 1, 'old transcript becomes one lecture');
+  assert.equal(app.final, 'osmosis is passive', 'must not lose the existing transcript');
+  assert.equal(app.lectures[0].notes, '## Summary\nosmosis');
+  assert.ok(!('transcript' in store), 'old keys cleaned up after migration');
+  assert.ok(JSON.parse(store.lectures)[0].transcript, 'migrated lecture is persisted');
+}
+
+// a new lecture must not append onto the last one
+{
+  const { app, sessions, nodes } = loadApp();
+  app.want = true; app.start();
+  sessions[0].say('lecture one');
+  app.want = false;
+  nodes.new.onclick();
+  assert.equal(app.lectures.length, 2);
+  assert.equal(app.final, '', 'new lecture starts empty');
+  app.want = true; app.start();
+  sessions[sessions.length - 1].say('lecture two');
+  assert.equal(app.final, 'lecture two ');
+  const one = app.lectures.find(l => l.transcript.startsWith('lecture one'));
+  assert.equal(one.transcript, 'lecture one ', 'the earlier lecture is untouched');
+}
+
+// switching back restores that lecture's transcript and notes
+{
+  const { app, sessions, nodes } = loadApp();
+  app.want = true; app.start();
+  sessions[0].say('first');
+  app.showNotes('## Summary\nfirst notes');
+  app.want = false;
+  nodes.new.onclick();
+  const firstId = app.lectures.find(l => l.transcript.startsWith('first')).id;
+  nodes.lectures.value = String(firstId);
+  nodes.lectures.onchange();
+  assert.equal(app.final, 'first ', 'switching back restores the transcript');
+  assert.ok(nodes.notes.innerHTML.includes('first notes'), 'and its notes');
+}
+
+// pressing New twice must not pile up blank lectures
+{
+  const { app, nodes } = loadApp();
+  nodes.new.onclick();
+  nodes.new.onclick();
+  assert.equal(app.lectures.length, 1, 'an untouched lecture is already new');
+}
+
+// delete removes only the open lecture, and never leaves zero
+{
+  const { app, sessions, nodes } = loadApp();
+  app.want = true; app.start();
+  sessions[0].say('keep me');
+  app.want = false;
+  nodes.new.onclick();
+  app.want = true; app.start();
+  sessions[sessions.length - 1].say('delete me');
+  app.want = false;
+  nodes.clear.onclick();
+  assert.equal(app.lectures.length, 1, 'only the open lecture is deleted');
+  assert.equal(app.lectures[0].transcript, 'keep me ');
+  nodes.clear.onclick();
+  assert.equal(app.lectures.length, 1, 'deleting the last one leaves a fresh empty lecture');
+  assert.equal(app.lectures[0].transcript, '');
+}
+
+// recording must not be switchable out from under itself
+{
+  const { app, nodes } = loadApp();
+  app.want = true; app.toggleUI();
+  assert.ok(nodes.lectures.disabled && nodes.new.disabled, 'locked while recording');
+  app.want = false; app.toggleUI();
+  assert.ok(!nodes.lectures.disabled, 'unlocked after stopping');
+}
+console.log('ok — lectures');

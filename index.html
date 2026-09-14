@@ -68,6 +68,8 @@
   /* controls */
   .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .bar .spacer { flex: 1; }
+  .bar-lectures { margin-top: 10px; }
+  .bar-lectures select { flex: 0 1 300px; }
   button {
     font: 500 14px/1 var(--sans);
     padding: 10px 15px; border-radius: var(--radius);
@@ -149,7 +151,12 @@
     <button id="gen" disabled>Generate notes</button>
     <button id="copy" disabled>Copy</button>
     <span class="spacer"></span>
-    <button id="clear">Clear</button>
+    <button id="clear">Delete</button>
+  </div>
+
+  <div class="bar bar-lectures">
+    <select id="lectures" aria-label="Saved lectures"></select>
+    <button id="new">New lecture</button>
   </div>
 
   <h2>Model <span class="note">key stays in this browser</span></h2>
@@ -177,7 +184,55 @@ const PROVIDERS = {
   ollama:     { name: 'Ollama (local, no key)',  url: 'http://localhost:11434/v1/chat/completions', model: 'llama3.1', hint: 'Fully local. Run: OLLAMA_ORIGINS=* ollama serve — only works when this page is on http://localhost' },
 };
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let final = localStorage.getItem('transcript') || '', want = false, rec;
+let want = false, rec;
+
+// Lectures are kept as a list; `final` is the open one's transcript.
+// Older builds stored a single transcript/notes pair — fold that in once.
+let lectures = JSON.parse(localStorage.getItem('lectures') || 'null');
+if (!lectures) {
+  const t = localStorage.getItem('transcript') || '', n = localStorage.getItem('notes') || '';
+  lectures = t || n ? [{ id: Date.now(), transcript: t, notes: n }] : [];
+  localStorage.removeItem('transcript'); localStorage.removeItem('notes');
+}
+if (!lectures.length) lectures.push({ id: Date.now(), transcript: '', notes: '' });
+let cur = lectures[0].id, final = lectures[0].transcript;
+
+const lecture = () => lectures.find(l => l.id === cur) || lectures[0];
+// ids double as the lecture's date, so keep them timestamps — but two lectures
+// made in the same millisecond must not collide into one
+const nextId = () => Math.max(Date.now(), ...lectures.map(l => l.id + 1));
+const save = () => localStorage.setItem('lectures', JSON.stringify(lectures));
+
+function title(l) {
+  const words = l.transcript.trim().split(/\s+/).filter(Boolean).slice(0, 7).join(' ');
+  const date = new Date(l.id).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return date + ' — ' + (words ? words + (l.transcript.trim().split(/\s+/).length > 7 ? '…' : '') : 'empty');
+}
+
+function renderLectures() {
+  $('lectures').innerHTML = lectures.map(l =>
+    `<option value="${l.id}">${title(l).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</option>`).join('');
+  $('lectures').value = cur;
+}
+
+function show(id) {
+  cur = id;
+  final = lecture().transcript;
+  $('notes').innerHTML = ''; $('copy').disabled = true;
+  if (lecture().notes) showNotes(lecture().notes);
+  renderLectures();
+  render('');
+}
+
+$('lectures').onchange = () => show(Number($('lectures').value));
+
+$('new').onclick = () => {
+  // an untouched lecture is already "new" — don't pile up blanks
+  if (!lecture().transcript && !lecture().notes) return;
+  lectures.unshift({ id: nextId(), transcript: '', notes: '' });
+  save();
+  show(lectures[0].id);
+};
 
 $('provider').innerHTML = Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}">${p.name}</option>`).join('');
 $('provider').value = localStorage.getItem('provider') || 'groq';
@@ -194,7 +249,8 @@ loadProvider();
 if (!SR) $('status').innerHTML = '<span class="err">— speech recognition needs Chrome/Edge/Safari</span>';
 
 function render(interim) {
-  localStorage.setItem('transcript', final);
+  lecture().transcript = final;
+  save();
   $('transcript').textContent = final + interim;
   $('transcript').scrollTop = 1e9;
   $('gen').disabled = !final.trim();
@@ -235,6 +291,7 @@ function toggleUI() {
   document.body.classList.toggle('recording', want);
   $('rec').textContent = want ? 'Stop' : 'Record';
   $('status').textContent = want ? 'listening' : '';
+  $('lectures').disabled = want; $('new').disabled = want;
   clearInterval(tick);
   if (want) {
     startedAt = Date.now();
@@ -287,21 +344,23 @@ $('gen').onclick = async () => {
 };
 
 function showNotes(text) {
-  localStorage.setItem('notes', text);
+  lecture().notes = text;
+  save();
+  renderLectures();
   $('notes').innerHTML = md(text);
   $('copy').disabled = false;
   $('copy').onclick = () => navigator.clipboard.writeText(text);
 }
 
 $('clear').onclick = () => {
-  if (!confirm('Delete this transcript and its notes?')) return;
-  final = ''; localStorage.removeItem('transcript'); localStorage.removeItem('notes');
-  $('notes').textContent = ''; $('copy').disabled = true;
-  render('');
+  if (!confirm('Delete this lecture and its notes?')) return;
+  lectures = lectures.filter(l => l.id !== cur);
+  if (!lectures.length) lectures.push({ id: Date.now(), transcript: '', notes: '' });
+  save();
+  show(lectures[0].id);
 };
 
-if (localStorage.getItem('notes')) showNotes(localStorage.getItem('notes'));
-render('');
+show(cur);
 
 // minimal markdown: headings, bullets, bold, code
 function md(s) {
