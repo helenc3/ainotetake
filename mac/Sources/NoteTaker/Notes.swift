@@ -16,7 +16,7 @@ enum Provider: String, CaseIterable, Identifiable {
 
     var model: String {
         switch self {
-        case .groq: return "llama-3.3-70b-versatile"
+        case .groq: return "llama-3.1-8b-instant"
         case .gemini: return "gemini-2.0-flash"
         case .openrouter: return "meta-llama/llama-3.3-70b-instruct:free"
         case .ollama: return "llama3.1"
@@ -34,7 +34,7 @@ enum Provider: String, CaseIterable, Identifiable {
 
     var hint: String {
         switch self {
-        case .groq: return "Free key: console.groq.com/keys"
+        case .groq: return "Free key: console.groq.com/keys — edit the model if your account has a bigger one"
         case .gemini: return "Free key: aistudio.google.com/apikey"
         case .openrouter: return "Free key: openrouter.ai/keys — model is a :free one"
         case .ollama: return "Fully local. Run: OLLAMA_ORIGINS=* ollama serve — only works when this page is on http://localhost"
@@ -42,6 +42,50 @@ enum Provider: String, CaseIterable, Identifiable {
     }
 
     var needsKey: Bool { self != .ollama }
+
+    /// Read when no key has been typed yet — set it in the shell before launching, or in `.env`.
+    var envVar: String {
+        switch self {
+        case .groq: return "GROQ_API_KEY"
+        case .gemini: return "GEMINI_API_KEY"
+        case .openrouter: return "OPENROUTER_API_KEY"
+        case .ollama: return ""
+        }
+    }
+}
+
+/// Key lookup for a provider: what you typed wins, then the shell environment,
+/// then a `.env` file. Nothing here is ever written back to `.env`.
+enum Env {
+    /// The app bundle lives in `mac/`, so the repo root is two levels up.
+    private static var searchPaths: [URL] {
+        let app = Bundle.main.bundleURL.deletingLastPathComponent()
+        return [app, app.deletingLastPathComponent(), FileManager.default.homeDirectoryForCurrentUser]
+            .map { $0.appendingPathComponent(".env") }
+    }
+
+    static func value(for name: String) -> String? {
+        if let v = ProcessInfo.processInfo.environment[name], !v.isEmpty { return v }
+        for url in searchPaths {
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            if let v = parse(text)[name], !v.isEmpty { return v }
+        }
+        return nil
+    }
+
+    /// A comment line can't match: "#" isn't a word character, so it never starts a key.
+    static func parse(_ text: String) -> [String: String] {
+        var env: [String: String] = [:]
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            guard let match = line.firstMatch(of: /^\s*(?:export\s+)?(\w+)\s*=\s*(.*)$/) else { continue }
+            var value = String(match.2).trimmingCharacters(in: .whitespaces)
+            if value.count >= 2, let q = value.first, q == "\"" || q == "'", value.last == q {
+                value = String(value.dropFirst().dropLast())
+            }
+            env[String(match.1)] = value
+        }
+        return env
+    }
 }
 
 enum NotesClient {
@@ -85,7 +129,7 @@ enum NotesClient {
         let error: Err
     }
 
-    static func generate(transcript: String, provider: Provider, key: String) async throws -> String {
+    static func generate(transcript: String, provider: Provider, model: String, key: String) async throws -> String {
         var request = URLRequest(url: provider.url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -93,7 +137,7 @@ enum NotesClient {
             request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         }
         let body = ChatRequest(
-            model: provider.model,
+            model: model.isEmpty ? provider.model : model,
             max_tokens: 4000,
             messages: [ChatRequest.Message(role: "user", content: prompt + transcript)]
         )

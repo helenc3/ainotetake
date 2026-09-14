@@ -18,7 +18,8 @@ dependencies.
 
 Transcript and notes persist across app relaunches. API keys are stored per
 provider in `UserDefaults`, never transmitted anywhere but to the chosen
-provider.
+provider. **Save…** picks a folder and writes
+`lecture-<date>-transcript.md` and `lecture-<date>-notes.md` into it.
 
 ### Build / run
 
@@ -49,7 +50,8 @@ One static file. No build, no backend, no dependencies.
    endpoint with a prompt that asks for: `## Summary`, `## Key points`,
    `## Terms & definitions`, `## Action items` — and explicitly forbids inventing
    facts not in the transcript.
-3. **Copy** — markdown to clipboard.
+3. **Copy / Save** — markdown to the clipboard, or to a file in a folder you pick
+   (Chrome/Edge open a real save dialog; other browsers fall back to Downloads).
 4. **Lectures** — each recording is saved separately and picked from a dropdown;
    **New lecture** starts a fresh one, **Delete** removes the open one. Transcripts
    from the older single-lecture build are migrated on first load.
@@ -57,16 +59,27 @@ One static file. No build, no backend, no dependencies.
 ### Providers
 
 Picked from a dropdown; key stored per-provider in `localStorage`, never sent anywhere else.
+The model name next to the key is editable and remembered per provider — free-tier
+accounts don't all get the same models (`llama-3.3-70b-versatile` needs an account
+that's been granted it), so swap it rather than editing the source.
 
 | Provider | Model | Cost |
 |---|---|---|
-| Groq (default) | `llama-3.3-70b-versatile` | free key |
+| Groq (default) | `llama-3.1-8b-instant` | free key |
 | Google Gemini | `gemini-2.0-flash` | free key |
 | OpenRouter | `llama-3.3-70b-instruct:free` | free key |
 | Ollama | `llama3.1` | none — fully local, no key |
 
 Ollama only works when the page itself is on `http://localhost` (an HTTPS page
 can't call a local HTTP server).
+
+### API key from `.env`
+
+Copy `.env.example` to `.env` (gitignored) and fill in `GROQ_API_KEY`. The web page
+fetches it on load and prefills the key field — this only works when the page is
+served from disk locally, and a key you type in the page still wins. The Mac app
+reads the same names from the shell environment, falling back to a `.env` next to
+the app bundle, one level up, or in your home directory.
 
 ### Run it
 

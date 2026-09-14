@@ -9,6 +9,7 @@ struct ContentView: View {
     @AppStorage("savedNotes") private var savedNotes: String = ""
 
     @State private var apiKey: String = ""
+    @State private var model: String = ""
     @State private var notes: String = ""
     @State private var isGenerating = false
     @State private var errorMessage: String?
@@ -90,6 +91,9 @@ struct ContentView: View {
             }
             .disabled(notes.isEmpty)
 
+            Button("Save…") { save() }
+                .disabled(transcriber.transcript.isEmpty && notes.isEmpty)
+
             Button("Clear") { showClearConfirm = true }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
@@ -143,14 +147,20 @@ struct ContentView: View {
                 if provider.needsKey {
                     SecureField("API key", text: $apiKey)
                         .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 280)
+                        .frame(maxWidth: 220)
                         .onChange(of: apiKey) { _, newValue in
                             UserDefaults.standard.set(newValue, forKey: "key_" + provider.rawValue)
                         }
                 }
+                TextField("Model", text: $model)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 220)
+                    .onChange(of: model) { _, newValue in
+                        UserDefaults.standard.set(newValue, forKey: "model_" + provider.rawValue)
+                    }
                 Spacer()
             }
-            Text(provider.hint + " · " + provider.model)
+            Text(provider.hint)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }
@@ -269,7 +279,34 @@ struct ContentView: View {
     }
 
     private func loadKey() {
-        apiKey = UserDefaults.standard.string(forKey: "key_" + provider.rawValue) ?? ""
+        let stored = UserDefaults.standard.string(forKey: "key_" + provider.rawValue) ?? ""
+        apiKey = stored.isEmpty ? (Env.value(for: provider.envVar) ?? "") : stored
+        model = UserDefaults.standard.string(forKey: "model_" + provider.rawValue) ?? provider.model
+    }
+
+    /// One panel, one folder: writes whichever of transcript/notes exist.
+    private func save() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Save Here"
+        panel.message = "Choose a folder for the transcript and notes."
+        guard panel.runModal() == .OK, let dir = panel.url else { return }
+
+        let stamp = ISO8601DateFormatter().string(from: Date()).prefix(10)
+        do {
+            if !transcriber.transcript.isEmpty {
+                try transcriber.transcript.write(to: dir.appendingPathComponent("lecture-\(stamp)-transcript.md"),
+                                                atomically: true, encoding: .utf8)
+            }
+            if !notes.isEmpty {
+                try notes.write(to: dir.appendingPathComponent("lecture-\(stamp)-notes.md"),
+                                atomically: true, encoding: .utf8)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func generateNotes() {
@@ -278,9 +315,10 @@ struct ContentView: View {
         let transcript = transcriber.transcript
         let currentProvider = provider
         let key = apiKey
+        let currentModel = model
         Task {
             do {
-                let result = try await NotesClient.generate(transcript: transcript, provider: currentProvider, key: key)
+                let result = try await NotesClient.generate(transcript: transcript, provider: currentProvider, model: currentModel, key: key)
                 notes = result
                 savedNotes = result
             } catch {

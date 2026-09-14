@@ -38,7 +38,7 @@ function loadApp(seed = {}) {
   }
   const script = src.slice(src.indexOf('<script>') + 8, src.indexOf('</script>'));
   const app = new Function('window', 'document', 'localStorage', 'navigator', 'Date', 'confirm',
-    script + '\nreturn { start, toggleUI, show, showNotes, get final() { return final },' +
+    script + '\nreturn { start, toggleUI, show, showNotes, parseEnv, filename, get final() { return final },' +
              ' set final(v) { final = v }, get lectures() { return lectures },' +
              ' get cur() { return cur }, get want() { return want }, set want(v) { want = v } };'
   )({ SpeechRecognition: FakeSR }, document, localStorage, { language: 'en-US' }, Date, () => true);
@@ -167,3 +167,21 @@ console.log('ok — restart path');
   assert.ok(!nodes.lectures.disabled, 'unlocked after stopping');
 }
 console.log('ok — lectures');
+
+// --- .env prefill: the key field is the only place a key is typed, so parsing must be boring ---
+{
+  const { app } = loadApp();
+  const env = app.parseEnv([
+    '# comment',
+    'GROQ_API_KEY=gsk_abc123',
+    '  export GEMINI_API_KEY = "quoted value" ',
+    'EMPTY=',
+    'not a line',
+  ].join('\n'));
+  assert.equal(env.GROQ_API_KEY, 'gsk_abc123');
+  assert.equal(env.GEMINI_API_KEY, 'quoted value', 'export prefix, spaces and quotes stripped');
+  assert.equal(env.EMPTY, '');
+  assert.ok(!('comment' in env) && !('not' in env));
+  assert.ok(app.filename('notes').endsWith('-notes.md'), 'saved file is named by lecture date');
+}
+console.log('ok — env');

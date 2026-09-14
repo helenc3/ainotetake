@@ -150,6 +150,8 @@
     <button id="rec">Record</button>
     <button id="gen" disabled>Generate notes</button>
     <button id="copy" disabled>Copy</button>
+    <button id="saveT" disabled>Save transcript…</button>
+    <button id="saveN" disabled>Save notes…</button>
     <span class="spacer"></span>
     <button id="clear">Delete</button>
   </div>
@@ -163,6 +165,7 @@
   <div class="row">
     <select id="provider"></select>
     <input id="key" type="password" placeholder="API key">
+    <input id="model" placeholder="model" aria-label="Model">
   </div>
   <p id="hint"></p>
 
@@ -178,10 +181,10 @@ const $ = id => document.getElementById(id);
 
 // All OpenAI-compatible /chat/completions endpoints.
 const PROVIDERS = {
-  groq:       { name: 'Groq (free key)',        url: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.3-70b-versatile', hint: 'Free key: console.groq.com/keys' },
-  gemini:     { name: 'Google Gemini (free key)', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', hint: 'Free key: aistudio.google.com/apikey' },
-  openrouter: { name: 'OpenRouter (free models)', url: 'https://openrouter.ai/api/v1/chat/completions', model: 'meta-llama/llama-3.3-70b-instruct:free', hint: 'Free key: openrouter.ai/keys — model is a :free one' },
-  ollama:     { name: 'Ollama (local, no key)',  url: 'http://localhost:11434/v1/chat/completions', model: 'llama3.1', hint: 'Fully local. Run: OLLAMA_ORIGINS=* ollama serve — only works when this page is on http://localhost' },
+  groq:       { name: 'Groq (free key)',        url: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.1-8b-instant', env: 'GROQ_API_KEY', hint: 'Free key: console.groq.com/keys — edit the model if your account has a bigger one' },
+  gemini:     { name: 'Google Gemini (free key)', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', env: 'GEMINI_API_KEY', hint: 'Free key: aistudio.google.com/apikey' },
+  openrouter: { name: 'OpenRouter (free models)', url: 'https://openrouter.ai/api/v1/chat/completions', model: 'meta-llama/llama-3.3-70b-instruct:free', env: 'OPENROUTER_API_KEY', hint: 'Free key: openrouter.ai/keys — model is a :free one' },
+  ollama:     { name: 'Ollama (local, no key)',  url: 'http://localhost:11434/v1/chat/completions', model: 'llama3.1', env: '', hint: 'Fully local. Run: OLLAMA_ORIGINS=* ollama serve — only works when this page is on http://localhost' },
 };
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let want = false, rec;
@@ -218,7 +221,7 @@ function renderLectures() {
 function show(id) {
   cur = id;
   final = lecture().transcript;
-  $('notes').innerHTML = ''; $('copy').disabled = true;
+  $('notes').innerHTML = ''; $('copy').disabled = $('saveN').disabled = true;
   if (lecture().notes) showNotes(lecture().notes);
   renderLectures();
   render('');
@@ -238,13 +241,32 @@ $('provider').innerHTML = Object.entries(PROVIDERS).map(([k, p]) => `<option val
 $('provider').value = localStorage.getItem('provider') || 'groq';
 $('provider').onchange = () => { localStorage.setItem('provider', $('provider').value); loadProvider(); };
 $('key').oninput = () => localStorage.setItem('key_' + $('provider').value, $('key').value.trim());
+$('model').oninput = () => localStorage.setItem('model_' + $('provider').value, $('model').value.trim());
+
+// Keys typed into the page win; a local .env just saves you the paste.
+let ENV = {};
 function loadProvider() {
-  const p = PROVIDERS[$('provider').value];
-  $('key').value = localStorage.getItem('key_' + $('provider').value) || '';
-  $('key').disabled = $('provider').value === 'ollama';
-  $('hint').textContent = p.hint + ' · model: ' + p.model;
+  const k = $('provider').value, p = PROVIDERS[k];
+  $('key').value = localStorage.getItem('key_' + k) || ENV[p.env] || '';
+  $('model').value = localStorage.getItem('model_' + k) || p.model;
+  $('key').disabled = k === 'ollama';
+  $('hint').textContent = p.hint;
 }
 loadProvider();
+// A comment line can't match: '#' isn't a \w, so it never starts a key.
+function parseEnv(text) {
+  const env = {};
+  for (const line of text.split('\n')) {
+    const m = line.match(/^\s*(?:export\s+)?(\w+)\s*=\s*(.*)$/);
+    if (m) env[m[1]] = m[2].trim().replace(/^(['"])(.*)\1$/, '$2');
+  }
+  return env;
+}
+// Served from disk only (python3 -m http.server); 404s harmlessly on GitHub Pages.
+window.fetch?.('.env').then(r => r.ok ? r.text() : '').then(text => {
+  ENV = parseEnv(text);
+  if (!$('key').value) loadProvider();
+}).catch(() => {});
 
 if (!SR) $('status').innerHTML = '<span class="err">— speech recognition needs Chrome/Edge/Safari</span>';
 
@@ -253,7 +275,7 @@ function render(interim) {
   save();
   $('transcript').textContent = final + interim;
   $('transcript').scrollTop = 1e9;
-  $('gen').disabled = !final.trim();
+  $('gen').disabled = $('saveT').disabled = !final.trim();
 }
 
 let sessionStart = 0, quickEnds = 0;
@@ -332,7 +354,7 @@ $('gen').onclick = async () => {
     const r = await fetch(p.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...(key && { authorization: 'Bearer ' + key }) },
-      body: JSON.stringify({ model: p.model, max_tokens: 4000, messages: [{ role: 'user', content: PROMPT + final }] }),
+      body: JSON.stringify({ model: $('model').value.trim() || p.model, max_tokens: 4000, messages: [{ role: 'user', content: PROMPT + final }] }),
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error?.message || r.statusText);
@@ -348,8 +370,32 @@ function showNotes(text) {
   save();
   renderLectures();
   $('notes').innerHTML = md(text);
-  $('copy').disabled = false;
+  $('copy').disabled = $('saveN').disabled = false;
   $('copy').onclick = () => navigator.clipboard.writeText(text);
+  $('saveN').onclick = () => saveFile(filename('notes'), text);
+}
+
+const filename = kind => 'lecture-' + new Date(lecture().id).toISOString().slice(0, 10) + '-' + kind + '.md';
+$('saveT').onclick = () => saveFile(filename('transcript'), lecture().transcript);
+
+// Chrome/Edge get a real directory picker; everyone else gets the downloads folder.
+async function saveFile(name, text) {
+  if (window.showSaveFilePicker) {
+    try {
+      const h = await showSaveFilePicker({ suggestedName: name, types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.txt'] } }] });
+      const w = await h.createWritable();
+      await w.write(text);
+      await w.close();
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return;  // user cancelled; fall through only on real failures
+    }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }));
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 $('clear').onclick = () => {
