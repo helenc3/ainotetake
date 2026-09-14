@@ -38,7 +38,8 @@ function loadApp(seed = {}) {
   }
   const script = src.slice(src.indexOf('<script>') + 8, src.indexOf('</script>'));
   const app = new Function('window', 'document', 'localStorage', 'navigator', 'Date', 'confirm',
-    script + '\nreturn { start, toggleUI, show, showNotes, parseEnv, filename, get final() { return final },' +
+    script + '\nreturn { start, toggleUI, show, showNotes, parseEnv, filename, renderProviders,' +
+             ' set ENV(v) { ENV = v }, get final() { return final },' +
              ' set final(v) { final = v }, get lectures() { return lectures },' +
              ' get cur() { return cur }, get want() { return want }, set want(v) { want = v } };'
   )({ SpeechRecognition: FakeSR }, document, localStorage, { language: 'en-US' }, Date, () => true);
@@ -168,7 +169,7 @@ console.log('ok — restart path');
 }
 console.log('ok — lectures');
 
-// --- .env prefill: the key field is the only place a key is typed, so parsing must be boring ---
+// --- .env is now the ONLY source of keys, so parsing must be boring ---
 {
   const { app } = loadApp();
   const env = app.parseEnv([
@@ -183,5 +184,16 @@ console.log('ok — lectures');
   assert.equal(env.EMPTY, '');
   assert.ok(!('comment' in env) && !('not' in env));
   assert.ok(app.filename('notes').endsWith('-notes.md'), 'saved file is named by lecture date');
+}
+
+// only providers with a key in .env may be picked (ollama needs none)
+{
+  const { app, nodes } = loadApp();
+  assert.ok(!nodes.provider.innerHTML.includes('Groq'), 'no key, not offered');
+  assert.ok(nodes.provider.innerHTML.includes('Ollama'), 'keyless provider always offered');
+  app.ENV = { GROQ_API_KEY: 'gsk_x' };
+  app.renderProviders();
+  assert.ok(nodes.provider.innerHTML.includes('Groq'));
+  assert.ok(!nodes.provider.innerHTML.includes('Gemini'), 'still no Gemini key');
 }
 console.log('ok — env');

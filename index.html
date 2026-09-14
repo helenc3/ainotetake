@@ -161,10 +161,9 @@
     <button id="new">New lecture</button>
   </div>
 
-  <h2>Model <span class="note">key stays in this browser</span></h2>
+  <h2>Model <span class="note">keys come from .env</span></h2>
   <div class="row">
     <select id="provider"></select>
-    <input id="key" type="password" placeholder="API key">
     <input id="model" placeholder="model" aria-label="Model">
   </div>
   <p id="hint"></p>
@@ -237,22 +236,28 @@ $('new').onclick = () => {
   show(lectures[0].id);
 };
 
-$('provider').innerHTML = Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}">${p.name}</option>`).join('');
-$('provider').value = localStorage.getItem('provider') || 'groq';
 $('provider').onchange = () => { localStorage.setItem('provider', $('provider').value); loadProvider(); };
-$('key').oninput = () => localStorage.setItem('key_' + $('provider').value, $('key').value.trim());
 $('model').oninput = () => localStorage.setItem('model_' + $('provider').value, $('model').value.trim());
 
-// Keys typed into the page win; a local .env just saves you the paste.
+// Keys only ever come from .env — nothing is typed into the page.
 let ENV = {};
+const keyFor = k => PROVIDERS[k].env ? ENV[PROVIDERS[k].env] || '' : '';
+const usable = k => !PROVIDERS[k].env || !!ENV[PROVIDERS[k].env];
+
+function renderProviders() {
+  const keys = Object.keys(PROVIDERS).filter(usable);
+  const want = localStorage.getItem('provider');
+  $('provider').innerHTML = keys.map(k => `<option value="${k}">${PROVIDERS[k].name}</option>`).join('');
+  $('provider').value = keys.includes(want) ? want : keys[0];
+  loadProvider();
+}
+
 function loadProvider() {
   const k = $('provider').value, p = PROVIDERS[k];
-  $('key').value = localStorage.getItem('key_' + k) || ENV[p.env] || '';
   $('model').value = localStorage.getItem('model_' + k) || p.model;
-  $('key').disabled = k === 'ollama';
   $('hint').textContent = p.hint;
 }
-loadProvider();
+renderProviders();
 // A comment line can't match: '#' isn't a \w, so it never starts a key.
 function parseEnv(text) {
   const env = {};
@@ -265,7 +270,7 @@ function parseEnv(text) {
 // Served from disk only (python3 -m http.server); 404s harmlessly on GitHub Pages.
 window.fetch?.('.env').then(r => r.ok ? r.text() : '').then(text => {
   ENV = parseEnv(text);
-  if (!$('key').value) loadProvider();
+  renderProviders();
 }).catch(() => {});
 
 if (!SR) $('status').innerHTML = '<span class="err">— speech recognition needs Chrome/Edge/Safari</span>';
@@ -347,8 +352,8 @@ Transcript:
 `;
 
 $('gen').onclick = async () => {
-  const p = PROVIDERS[$('provider').value], key = $('key').value.trim();
-  if (!key && $('provider').value !== 'ollama') { $('notes').innerHTML = '<p class="err">Add an API key above to generate notes.</p>'; $('key').focus(); return; }
+  const k = $('provider').value, p = PROVIDERS[k], key = keyFor(k);
+  if (!key && p.env) { $('notes').innerHTML = '<p class="err">Add ' + p.env + ' to .env and reload.</p>'; return; }
   $('gen').disabled = true; $('notes').innerHTML = '<p class="working">Writing notes…</p>';
   try {
     const r = await fetch(p.url, {
