@@ -1,0 +1,152 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lecture Notes</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 820px; margin: 0 auto; padding: 24px 16px; }
+  header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0 auto 0 0; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid #8884; background: #8881; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #rec.on { background: #e34; color: #fff; border-color: #e34; }
+  input, select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid #8884; background: transparent; width: 100%; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin: 28px 0 8px; }
+  #transcript { white-space: pre-wrap; max-height: 30vh; overflow: auto; padding: 12px; border: 1px solid #8883; border-radius: 8px; opacity: .8; font-size: 14px; }
+  #notes { padding: 12px 0; }
+  #notes li { margin: 2px 0; }
+  .err { color: #e34; }
+</style>
+
+<header>
+  <h1>Lecture Notes</h1>
+  <button id="rec">● Record</button>
+  <button id="gen" disabled>Generate notes</button>
+  <button id="copy" disabled>Copy</button>
+</header>
+
+<h2>Model <span style="text-transform:none;letter-spacing:0">— key is stored in this browser only</span></h2>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+  <select id="provider"></select>
+  <input id="key" type="password" placeholder="API key" style="flex:1;min-width:200px">
+</div>
+<p id="hint" style="font-size:13px;opacity:.7;margin:6px 0 0"></p>
+
+<h2>Transcript <span id="status"></span></h2>
+<div id="transcript"></div>
+
+<h2>Notes</h2>
+<div id="notes"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// All OpenAI-compatible /chat/completions endpoints.
+const PROVIDERS = {
+  groq:       { name: 'Groq (free key)',        url: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.3-70b-versatile', hint: 'Free key: console.groq.com/keys' },
+  gemini:     { name: 'Google Gemini (free key)', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', hint: 'Free key: aistudio.google.com/apikey' },
+  openrouter: { name: 'OpenRouter (free models)', url: 'https://openrouter.ai/api/v1/chat/completions', model: 'meta-llama/llama-3.3-70b-instruct:free', hint: 'Free key: openrouter.ai/keys — model is a :free one' },
+  ollama:     { name: 'Ollama (local, no key)',  url: 'http://localhost:11434/v1/chat/completions', model: 'llama3.1', hint: 'Fully local. Run: OLLAMA_ORIGINS=* ollama serve — only works when this page is on http://localhost' },
+};
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let final = '', want = false, rec;
+
+$('provider').innerHTML = Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}">${p.name}</option>`).join('');
+$('provider').value = localStorage.getItem('provider') || 'groq';
+$('provider').onchange = () => { localStorage.setItem('provider', $('provider').value); loadProvider(); };
+$('key').oninput = () => localStorage.setItem('key_' + $('provider').value, $('key').value.trim());
+function loadProvider() {
+  const p = PROVIDERS[$('provider').value];
+  $('key').value = localStorage.getItem('key_' + $('provider').value) || '';
+  $('key').disabled = $('provider').value === 'ollama';
+  $('hint').textContent = p.hint + ' · model: ' + p.model;
+}
+loadProvider();
+
+if (!SR) $('status').innerHTML = '<span class="err">— speech recognition needs Chrome/Edge/Safari</span>';
+
+function render(interim) {
+  $('transcript').textContent = final + interim;
+  $('transcript').scrollTop = 1e9;
+  $('gen').disabled = !final.trim();
+}
+
+function start() {
+  rec = new SR();
+  rec.continuous = true; rec.interimResults = true; rec.lang = navigator.language || 'en-US';
+  rec.onresult = e => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) final += t.trim() + ' '; else interim += t;
+    }
+    render(interim);
+  };
+  // browsers cut the stream every ~60s; just restart while recording
+  rec.onend = () => { if (want) start(); };
+  rec.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { want = false; toggleUI(); $('status').innerHTML = '<span class="err">— mic permission denied</span>'; } };
+  rec.start();
+}
+
+function toggleUI() {
+  $('rec').classList.toggle('on', want);
+  $('rec').textContent = want ? '■ Stop' : '● Record';
+  $('status').textContent = want ? '— listening' : '';
+}
+
+$('rec').onclick = () => {
+  if (!SR) return;
+  want = !want;
+  if (want) start(); else rec && rec.stop();
+  toggleUI();
+};
+
+const PROMPT = `You are taking notes for a student during a lecture. Below is a raw, unpunctuated speech-to-text transcript that may contain recognition errors — infer the intended words.
+
+Write clear lecture notes in markdown:
+- A "## Summary" of 2-3 sentences
+- "## Key points" as nested bullets organized by topic
+- "## Terms & definitions" for any jargon defined
+- "## Action items" for anything assigned, due, or flagged as exam material (omit the section if none)
+
+Only use what is in the transcript. Do not invent facts.
+
+Transcript:
+`;
+
+$('gen').onclick = async () => {
+  const p = PROVIDERS[$('provider').value], key = $('key').value.trim();
+  if (!key && $('provider').value !== 'ollama') return $('notes').innerHTML = '<p class="err">Add an API key above.</p>';
+  $('gen').disabled = true; $('notes').textContent = 'Thinking…';
+  try {
+    const r = await fetch(p.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(key && { authorization: 'Bearer ' + key }) },
+      body: JSON.stringify({ model: p.model, max_tokens: 4000, messages: [{ role: 'user', content: PROMPT + final }] }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error?.message || r.statusText);
+    const text = j.choices[0].message.content;
+    $('notes').innerHTML = md(text);
+    $('copy').disabled = false;
+    $('copy').onclick = () => navigator.clipboard.writeText(text);
+  } catch (e) {
+    $('notes').innerHTML = '<p class="err">' + e.message + '</p>';
+  }
+  $('gen').disabled = false;
+};
+
+// minimal markdown: headings, bullets, bold, code
+function md(s) {
+  const esc = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  return esc(s)
+    .replace(/^### (.*)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.*)$/gm, '<h2 style="font-size:17px;text-transform:none;letter-spacing:0;opacity:1">$1</h2>')
+    .replace(/^# (.*)$/gm, '<h2 style="font-size:19px;text-transform:none;letter-spacing:0;opacity:1">$1</h2>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+    .replace(/^(\s*)[-*] (.*)$/gm, (_, sp, t) => `<li style="margin-left:${sp.length * 12}px">${t}</li>`)
+    .replace(/(<li[\s\S]*?<\/li>\n?)+/g, m => '<ul>' + m + '</ul>')
+    .replace(/^(?!<[hul])(.+)$/gm, '<p>$1</p>');
+}
+</script>
