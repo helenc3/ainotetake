@@ -23,6 +23,7 @@
   <button id="rec">● Record</button>
   <button id="gen" disabled>Generate notes</button>
   <button id="copy" disabled>Copy</button>
+  <button id="clear">Clear</button>
 </header>
 
 <h2>Model <span style="text-transform:none;letter-spacing:0">— key is stored in this browser only</span></h2>
@@ -49,7 +50,7 @@ const PROVIDERS = {
   ollama:     { name: 'Ollama (local, no key)',  url: 'http://localhost:11434/v1/chat/completions', model: 'llama3.1', hint: 'Fully local. Run: OLLAMA_ORIGINS=* ollama serve — only works when this page is on http://localhost' },
 };
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let final = '', want = false, rec;
+let final = localStorage.getItem('transcript') || '', want = false, rec;
 
 $('provider').innerHTML = Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}">${p.name}</option>`).join('');
 $('provider').value = localStorage.getItem('provider') || 'groq';
@@ -66,6 +67,7 @@ loadProvider();
 if (!SR) $('status').innerHTML = '<span class="err">— speech recognition needs Chrome/Edge/Safari</span>';
 
 function render(interim) {
+  localStorage.setItem('transcript', final);
   $('transcript').textContent = final + interim;
   $('transcript').scrollTop = 1e9;
   $('gen').disabled = !final.trim();
@@ -126,15 +128,29 @@ $('gen').onclick = async () => {
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error?.message || r.statusText);
-    const text = j.choices[0].message.content;
-    $('notes').innerHTML = md(text);
-    $('copy').disabled = false;
-    $('copy').onclick = () => navigator.clipboard.writeText(text);
+    showNotes(j.choices[0].message.content);
   } catch (e) {
     $('notes').innerHTML = '<p class="err">' + e.message + '</p>';
   }
   $('gen').disabled = false;
 };
+
+function showNotes(text) {
+  localStorage.setItem('notes', text);
+  $('notes').innerHTML = md(text);
+  $('copy').disabled = false;
+  $('copy').onclick = () => navigator.clipboard.writeText(text);
+}
+
+$('clear').onclick = () => {
+  if (!confirm('Delete this transcript and its notes?')) return;
+  final = ''; localStorage.removeItem('transcript'); localStorage.removeItem('notes');
+  $('notes').textContent = ''; $('copy').disabled = true;
+  render('');
+};
+
+if (localStorage.getItem('notes')) showNotes(localStorage.getItem('notes'));
+render('');
 
 // minimal markdown: headings, bullets, bold, code
 function md(s) {
