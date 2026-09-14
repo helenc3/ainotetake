@@ -12,6 +12,9 @@ final class Transcriber: ObservableObject {
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+    // Bumped on every restart. Callbacks from a superseded session carry a
+    // stale value and are ignored, so one dying session can't spawn two.
+    private var generation = 0
 
     func toggle() {
         isRecording ? stop() : start()
@@ -85,10 +88,13 @@ final class Transcriber: ObservableObject {
             newRequest.requiresOnDeviceRecognition = true
         }
         request = newRequest
+        generation += 1
+        let gen = generation
 
         task = recognizer.recognitionTask(with: newRequest) { [weak self] result, error in
             guard let self else { return }
             Task { @MainActor in
+                guard gen == self.generation else { return }
                 if let result {
                     if result.isFinal {
                         self.appendFinal(result.bestTranscription.formattedString)
@@ -112,6 +118,8 @@ final class Transcriber: ObservableObject {
 
     private func restartIfNeeded() {
         guard isRecording else { return }
+        task?.cancel()
+        request?.endAudio()
         request = nil
         task = nil
         startRecognitionTask()

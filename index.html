@@ -200,8 +200,10 @@ function render(interim) {
   $('gen').disabled = !final.trim();
 }
 
+let sessionStart = 0, quickEnds = 0;
 function start() {
   rec = new SR();
+  sessionStart = Date.now();
   rec.continuous = true; rec.interimResults = true; rec.lang = navigator.language || 'en-US';
   rec.onresult = e => {
     let interim = '';
@@ -211,8 +213,19 @@ function start() {
     }
     render(interim);
   };
-  // browsers cut the stream every ~60s; just restart while recording
-  rec.onend = () => { if (want) start(); };
+  // browsers cut the stream every ~60s; just restart while recording.
+  // But a session that dies instantly means something is actually wrong
+  // (offline, mic gone) — don't hot-loop forever showing "listening".
+  rec.onend = () => {
+    if (!want) return;
+    if (Date.now() - sessionStart >= 1000) quickEnds = 0;
+    else if (++quickEnds > 5) {
+      want = false; toggleUI();
+      $('status').innerHTML = '<span class="err">— recognition keeps dropping; check mic and connection</span>';
+      return;
+    }
+    start();
+  };
   rec.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { want = false; toggleUI(); $('status').innerHTML = '<span class="err">— mic permission denied</span>'; } };
   rec.start();
 }
